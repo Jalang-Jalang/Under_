@@ -1,10 +1,16 @@
-const { Client, MessageEmbed } = require("discord.js");
-const canvas = require('canvas');
-const client = new Client();
+const Discord = require("discord.js");
+const Canvas = require('canvas');
+const client = new Discord.Client();
 const fs = require("fs");
 const token = process.env.TOKEN;
 const seed = Math.floor(Math.random() * 100000000);
-const { prefix , owner , diceData } = require("./config.json")
+
+const commandManager = require("./CommandManager.js")
+commandManager.getCommand("", "", "", "")
+
+const { prefix , owners , diceData } = require("./config.json")
+const speedtexts = require("./textsData.json")
+
 const syntax = {
   sum: {
     format: "$+$",
@@ -70,26 +76,43 @@ const syntax = {
     format: "$:$",
     args: 2,
     call: (a, b) => Array.from(Array(b.split(",").length + a.split(",").length)).map((e,i) => a.split(",")[i] || b.split(",")[i-a.split(",").length])
-  }
-
-  
+  }  
 }
+
+let globalTemp = {};
 
 let ddata = require(diceData);
 
 client.on("ready", () => {
+
+  /**
+  * 
+  */
+
   console.log(`logged in as ${client.user.tag} on ${client.guilds.cache.size} server(s).`);
+
+  /**
+  * 
+  */
+
   client.user.setActivity(`${prefix}help | Back up!`,{ type: "LISTENING" })
+
+  /**
+  * 
+  */
+
   let increment = 0;
   let rotation = [`${prefix}help | ${client.guilds.cache.size} server(s)`]
+
   client.setInterval(() => {
-    increment = (increment + 1) % 1
+    increment = (increment + 1) % rotation.length
     client.user.setActivity(rotation[increment],{ type: "LISTENING" })
   }, 4000)
+
 });
 
-client.on("message", message => {
-  
+client.on("message", async message => {
+
   if(message.author.bot || !message.content.startsWith(prefix)) return;
   
   const args = message.content.slice(prefix.length).split(/ +/);
@@ -102,7 +125,10 @@ client.on("message", message => {
     message.channel.send("pinging...")
       .then(msg => {
         msg.channel.send(
-          output.addField(`User ping`, `:person_shrugging: ${Date.now() - start}ms`, true).addField(`API ping`,`:robot: ${client.ws.ping}ms`,true).addField(`Seed`, `:seedling: ${seed}`, true)
+          output
+            .addField(`User ping`, `:person_shrugging: ${Date.now() - start}ms`, true)
+            .addField(`API ping`,`:robot: ${client.ws.ping}ms`,true)
+            .addField(`Seed`, `:seedling: ${seed}`, true)
           )
         msg.delete()
       })
@@ -110,7 +136,7 @@ client.on("message", message => {
   }
 
   if(command === "die") {
-    if(!message.member.user.id === owner) return error(message, "Denied.")
+    if(!owners.includes(message.member.user.id)) return error(message, "Denied.")
     process.exit()
   }
 
@@ -126,10 +152,10 @@ client.on("message", message => {
 
       if(args[2] === "delete") delete ddata.dices[args[1]]
       else if (args[2].match(/^([0-9]+(,)?)*$/) || args[2].match(/`+\S+`+/)) ddata.dices[args[1]] = args[2].match(/^([0-9]+(,)?)*$/) ? args[2].split(",") : args[2].match(/`+\S+`+/) ? args[2].match(/`+\S+`+/)[0].replace(/`+/g, "") : error(message, "Syntax error: dice format must be either 0,1,2,.. or `formula`");
-      else return error(message, "Syntax error: dice format must be either 0,1,2,.. or `formula`")
+      else return error(message, "Syntax error: dice format must be either 0,1,2,.. or \`formula\`. ")
 
       write(diceData, ddata);
-      message.channel.send(embed(message).setDescription("Database update succesful."))
+      message.channel.send(embed(message).setDescription(addCode("diff\n+Database update succesful")))
       return
     } 
     else if(args[0].toLowerCase() === "list") {
@@ -142,6 +168,7 @@ client.on("message", message => {
         em.addField(kdices[i], ddata.dices[kdices[i]] instanceof Array ? addCode(ddata.dices[kdices[i]].join(',')) : addCode(ddata.dices[kdices[i]]), true)         
       }
       message.channel.send(em)
+
     }
     else if (ddata.dices[args[0]] || ddata.dices[args[0].replace(/\d+/, "x").replace(/\d+/, "y")] || ddata.dices[args[0].replace(/\d+/, "y").replace(/\d+/, "x")]) {
       let actions = rawargs.split(/ +\, +/);
@@ -153,12 +180,13 @@ client.on("message", message => {
         if(isNaN(actions[index])) {
           
           let tempargs = actions[index].split(/ +/)
-          let tempsdice = ddata.dices[args[0]] || ddata.dices[args[0].replace(/\d+/, "x").replace(/\d+/, "y")] || ddata.dices[args[0].replace(/\d+/, "y").replace(/\d+/, "x")]
+          if (!(tempargs[0].split(/[^\d]+/gi).every(x => x < 1000000))) return error(message, "The number limit is 1.000.000 on Dice " + (index + 1))
+          let tempsdice = ddata.dices[tempargs[0]] || ddata.dices[tempargs[0].replace(/\d+/, "x").replace(/\d+/, "y")] || ddata.dices[tempargs[0].replace(/\d+/, "y").replace(/\d+/, "x")]
 
           if(!tempsdice) return error(message, `Dice ${index+1} could not be found.`)
 
           let dice = express(tempsdice, tempargs[0])
-          let extra = (tempargs[2] ? tempargs[2] : tempargs[1] ? tempargs[1] : "").replace(/[^\/\.\d\*\+\-\(\)\%]/g, "");
+          let extra = (tempargs[2] ? tempargs[2] : tempargs[1] ? tempargs[1].match(/[\/\.\*\+\-\(\)\%]+/g) ? tempargs[1] : "" : "").replace(/[^\/\.\d\*\+\-\(\)\%]+/g, "");
 
           try {
             eval(`1${tempargs[1] || tempargs[2] ? extra : ""}`)
@@ -168,12 +196,12 @@ client.on("message", message => {
             console.warn(err);
             return
           }
-          
-          if(!(dice instanceof Array)) return error(message, "Internal: wrong dice format.")
+
+          if(!(dice instanceof Array)) return error(message, `Internal: wrong dice format. (at index${index+1})`)
 
           let rolls = [];
 
-          for (let d = 0; d < Number(tempargs[1] ? tempargs[1].match(/[\/\.\d\*\+\-\(\)\%]/g) ? 1 : tempargs[1] : 1); d++) {
+          for (let d = 0; d < Number(tempargs[1] ? tempargs[1].match(/[\/\.\*\+\-\(\)\%]+/g) ? 1 : tempargs[1] : 1); d++) {
             rolls.push(dice[Math.floor (Math.random() * dice.length)])
           }
 
@@ -181,7 +209,7 @@ client.on("message", message => {
             rollsText += `Results: \`${rolls.join(' ').length > 1000 ? 'too long to display' : rolls.join(' ')}\`, Operation: \`${extra.length > 0 ? extra : "---"}\` \n`
           }
           else {
-            rollsText += `Dice: \`${tempargs[0]}\` Quantity: \`${tempargs[1] ? tempargs[1].match(/[\/\.\d\*\+\-\(\)\%]/g) ? 1 : tempargs[1] : 1}\` Results: \`${rolls.join(' ').length > 1000 ? 'too long to display' : rolls.join(' ')}\`\nOperation: \`${extra.length > 0 ? extra : "---"}\` **Sum:** \`${Math.floor(eval(rolls.reduce((a, b) => eval(`${a} + ${b}`), 0) + extra))}\` \n`
+            rollsText += `Dice: \`${tempargs[0]}\` Quantity: \`${tempargs[1] ? tempargs[1].match(/[\/\.\*\+\-\(\)\%]+/g) ? 1 : tempargs[1] : 1}\` Results: \`${rolls.join(' ').length > 1000 ? 'too long to display' : rolls.join(' ')}\`\nOperation: \`${extra.length > 0 ? extra : "---"}\` **Sum:** \`${Math.floor(eval(rolls.reduce((a, b) => eval(`${a} + ${b}`), 0) + extra))}\` \n`
           }
           
           then.push(eval(rolls.reduce((a, b) => eval(`${a} + ${b}`), 0) + extra).toString())
@@ -207,8 +235,78 @@ client.on("message", message => {
     message.channel.send(embed(message).setDescription("*coming soon...*"))
   }
 
+  if(command === "bell") {
+
+    let length = args[1]
+    let lang = args[0]
+
+    if(!speedtexts[lang] || !speedtexts["sizes"].includes(length)) return error(message, "Invalid arguments. Please chose a valid language and/or length")
+
+    message.reply("Speedtest procedure started, You have 5s to prepare. Type _.ding! at the beginning of your message.")
+      .then(() => {
+        setTimeout(async () => {
+          if(!hasTemp(message.member)) {
+            let start = await sendText(message,lang,length)
+            insertTemp(message.member,"bell", start)
+          }
+        },5000)
+      })
+      .catch(err => console.log(err))
+  }
+
+  if(command === "ding!") {
+    let dingTime = message.createdTimestamp
+    if(hasTemp(message.member, "bell")) {
+      message.channel.send(embed(message).setDescription(`Dong. You took ${((dingTime - globalTemp[message.member.user.id].temp0.time)/1000).toFixed(2)}s to answer!`))
+      endTemp(message.member)
+    } else return error(message, "you have to ask for a text using _.bell first, or end your other actions")
+  }
+
 });
 
+async function sendText(message, lang, length) {
+  let rawtext = speedtexts[lang].split(". ").map(e => `${e}.`)
+  let phraseLength = 0;
+  switch(length) {
+    case "small":
+      phraseLength = 2;
+      break
+    case "medium":
+      phraseLength = 4;
+      break
+    case "big":
+      phraseLength = 10;
+      break
+  }
+
+  let seed = Math.floor(Math.random() * (rawtext.length - (phraseLength - 1)))
+  let text = Array.from(Array(phraseLength)).map((e, i) => rawtext[seed + i] || "").join(" ")
+  let msg = await message.channel.send(addCode(text))
+  return {time: msg.createdTimestamp, text: text};
+}
+
+function insertTemp(member, action) {
+  if (globalTemp[member.user.id]) return false
+
+  let args = Array.from(arguments)
+  args.splice(0,2)
+  
+  globalTemp[member.user.id] = {action: action}
+  for (let i = 0; i < args.length; i++) {
+    globalTemp[member.user.id][`temp${i}`] = args[i]
+  }
+}
+
+function hasTemp(member, action) {
+  if(Object.keys(globalTemp).includes(member.user.id) && action)
+    return globalTemp[member.user.id].action === action;
+  else return Object.keys(globalTemp).includes(member.user.id)
+}
+
+function endTemp(member) {
+  if (!globalTemp[member.user.id]) return false
+  else delete globalTemp[member.user.id]
+}
 
 function write(goto, d) {
   fs.writeFile(goto, JSON.stringify (d, null, 4), err => {
@@ -217,7 +315,7 @@ function write(goto, d) {
 }
 
 function embed(message) {
-  return new MessageEmbed()
+  return new Discord.MessageEmbed()
       .setAuthor(message.member.user.tag, message.author.displayAvatarURL())
       .setThumbnail(client.user.displayAvatarURL())
       .setTimestamp()
@@ -225,7 +323,7 @@ function embed(message) {
 }
 
 function error(message, desc) {
-  message.channel.send(embed(message).setDescription(desc))
+  message.channel.send(embed(message).setDescription(addCode(`diff\n-${desc}`)))
 }
 
 function addCode(str) {
@@ -241,7 +339,7 @@ function express(expression, input, errors) {
     return expression
   }
   else {
-    let temp = !input.match(/\d+/g) ? expression : input.match(/\d+/g).length == 1 ? expression.replace("x", `${input.match(/\d+/)[0]}`) : expression.replace("x", `${input.match(/\d+/)[0]}`).replace("y", `${input.match(/\d+/g)[1]}`)
+    let temp = (!input.match(/\d+/g) ? expression : input.match(/\d+/g).length == 1 ? expression.replace(/x/g, `${input.match(/\d+/)[0]}`) : expression.replace(/x/g, `${input.match(/\d+/)[0]}`).replace(/y/g, `${input.match(/\d+/g)[1]}`)).replace(/`+/g, "")
     let ordering = []
     let group;
     while (temp.match(/[\(\)]/g)) {
@@ -268,7 +366,6 @@ function translate(group) {
 function unmatched (a,b) {
   return Array.from(Array(Math.max(a.length, b.length))).map((e, i) => b[i] ? (a[i] || undefined) !== b[i] ? b[i] : undefined : a[i]).join("")
 }
-
 
 client.login(token);
 

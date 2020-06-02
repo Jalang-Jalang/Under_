@@ -2,6 +2,7 @@
     "dices": {
         "dx": "1~x",
         "bx": "0~x",
-        "rangex,y": "x~y"
+        "rangex,y": "x~y",
+        "xoy": "(0**(y-x)):(1**x)"
     }
 }
